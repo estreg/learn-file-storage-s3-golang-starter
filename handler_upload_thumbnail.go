@@ -1,10 +1,14 @@
 package main
 
 import (
-	"encoding/base64"
+	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -61,21 +65,29 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	dataStr := base64.StdEncoding.EncodeToString(data)
+	reader := bytes.NewReader(data)
 
-	dataURL := fmt.Sprintf("data:%s;base64,%s", contentType, dataStr)
+	contentTypeParts := strings.Split(contentType, "/")
+	fileExtension := contentTypeParts[1]
+
+	uuidAsString := videoID.String()
+	newFile := uuidAsString + "." + fileExtension
+
+	assetsFilepath := filepath.Join(cfg.assetsRoot, newFile)
+
+	assetFile, err := os.Create(assetsFilepath)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	if _, err := io.Copy(assetFile, reader); err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	dataURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, uuidAsString, fileExtension)
 	video.ThumbnailURL = &dataURL
-
-	/*
-		tn := thumbnail{
-			data:      data,
-			mediaType: contentType,
-		}
-		videoThumbnails[videoID] = tn
-
-		url := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID)
-		video.ThumbnailURL = &url
-	*/
 
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
