@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -47,10 +43,23 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	defer file.Close()
 
 	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing Content-Type for thumbnail", nil)
+		return
+	}
 
-	data, err := io.ReadAll(file)
+	assetPath := getAssetPath(videoID, contentType)
+	assetDiskPath := cfg.getAssetDiskPath(assetPath)
+
+	assetFile, err := os.Create(assetDiskPath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to read file", err)
+		respondWithError(w, http.StatusInternalServerError, "Unable to create file", err)
+		return
+	}
+	defer assetFile.Close()
+
+	if _, err := io.Copy(assetFile, file); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
 		return
 	}
 
@@ -65,29 +74,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	reader := bytes.NewReader(data)
-
-	contentTypeParts := strings.Split(contentType, "/")
-	fileExtension := contentTypeParts[1]
-
-	uuidAsString := videoID.String()
-	newFile := uuidAsString + "." + fileExtension
-
-	assetsFilepath := filepath.Join(cfg.assetsRoot, newFile)
-
-	assetFile, err := os.Create(assetsFilepath)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	if _, err := io.Copy(assetFile, reader); err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	dataURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, uuidAsString, fileExtension)
-	video.ThumbnailURL = &dataURL
+	dataUrl := cfg.getAssetURL(assetPath)
+	video.ThumbnailURL = &dataUrl
 
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
